@@ -20,7 +20,7 @@ const client = new Client({
 function normalize(value) {
   return value.toLowerCase().trim()
     .replace(/[ًٌٍَُِّْـ]/g, "")
-    .replace(/[إأآ]/g, "ا")
+    .replace(/\s+/g, " ")
     .replace(/ى/g, "ي")
     .replace(/[؟?!.,،؛:()[\\]{}"'`]/g, " ")
     .replace(/\\s+/g, " ")
