@@ -20,10 +20,10 @@ const client = new Client({
 function normalize(value) {
   return value.toLowerCase().trim()
     .replace(/[ًٌٍَُِّْـ]/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[إأآ]/g, "ا")
     .replace(/ى/g, "ي")
     .replace(/[؟?!.,،؛:()[\\]{}"'`]/g, " ")
-    .replace(/\\s+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -32,22 +32,34 @@ for (const law of laws) {
   for (const alias of law.aliases) aliasMap.set(normalize(alias), law);
 }
 
-function findLaw(content) {
-  const cleaned = normalize(content);
-  if (aliasMap.has(cleaned)) return aliasMap.get(cleaned);
+function findLaws(content) {
+  // Supports one code per line, several codes in one message, or a full law name.
+  const found = new Map();
+  const lines = content.split(/\r?\n/).map(line => normalize(line)).filter(Boolean);
 
-  // Exact word matching for short abbreviations avoids accidental matches inside other words.
-  const tokens = cleaned.split(" ");
-  for (const token of tokens) {
-    if (aliasMap.has(token)) return aliasMap.get(token);
-  }
+  for (const line of lines) {
+    if (aliasMap.has(line)) {
+      const law = aliasMap.get(line);
+      found.set(law.code, law);
+      continue;
+    }
 
-  // Multi-word aliases are checked after exact aliases.
-  const aliases = [...aliasMap.entries()].sort((a, b) => b[0].length - a[0].length);
-  for (const [alias, law] of aliases) {
-    if (alias.length > 2 && (` ${cleaned} `).includes(` ${alias} `)) return law;
+    const tokens = line.split(/\s+/);
+    for (const token of tokens) {
+      if (aliasMap.has(token)) {
+        const law = aliasMap.get(token);
+        found.set(law.code, law);
+      }
+    }
+
+    const aliases = [...aliasMap.entries()]
+      .filter(([alias]) => alias.length > 2)
+      .sort((a, b) => b[0].length - a[0].length);
+    for (const [alias, law] of aliases) {
+      if ((` ${line} `).includes(` ${alias} `)) found.set(law.code, law);
+    }
   }
-  return null;
+  return [...found.values()];
 }
 
 client.once(Events.ClientReady, readyClient => {
@@ -61,25 +73,27 @@ client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.guild) return;
   if (message.guild.id !== guildId || message.channel.id !== channelId) return;
 
-  const law = findLaw(message.content);
-  if (!law) return;
+  const matchedLaws = findLaws(message.content);
+  if (!matchedLaws.length) return;
 
-  const embed = new EmbedBuilder()
-    .setColor(color)
-    .setTitle(`${law.code} | ${law.name}`)
-    .setDescription(law.description)
-    .addFields(
-      { name: "📖 شرح القانون", value: law.details || "يرجى الالتزام بتعليمات الإدارة.", inline: false },
-      { name: "🧾 مثال على المخالفة", value: law.examples || "تحدد الحالة حسب الموقف.", inline: false },
-      { name: "⚖️ العقوبة", value: law.punishment || "تحدد الإدارة العقوبة حسب الحالة.", inline: false }
-    )
-    .setFooter({ text: "MTA:SA • موسوعة قوانين السيرفر" })
-    .setTimestamp();
+  for (const law of matchedLaws) {
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setTitle(`${law.code} | ${law.name}`)
+      .setDescription(law.description)
+      .addFields(
+        { name: "📖 شرح القانون", value: law.details || "يرجى الالتزام بتعليمات الإدارة.", inline: false },
+        { name: "🧾 مثال على المخالفة", value: law.examples || "تحدد الحالة حسب الموقف.", inline: false },
+        { name: "⚖️ العقوبة", value: law.punishment || "تحدد الإدارة العقوبة حسب الحالة.", inline: false }
+      )
+      .setFooter({ text: "MTA:SA • موسوعة قوانين السيرفر" })
+      .setTimestamp();
 
-  try {
-    await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
-  } catch (err) {
-    console.error("تعذر إرسال الرد. تحقق من صلاحيات الروم:", err.message);
+    try {
+      await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
+    } catch (err) {
+      console.error(`تعذر إرسال رد القانون ${law.code}:`, err.message);
+    }
   }
 });
 
